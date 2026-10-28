@@ -132,28 +132,35 @@
 - 现象：生产迁移日志提示 `redisUrl not found`，并回退到 fake Redis、本地事件总线与内存锁。
 - 根因：服务器已设置 `REDIS_URL`，但 `medusa-config.ts` 未将它映射到 `projectConfig.redisUrl`。
 - 修复：显式读取 `process.env.REDIS_URL`，并在模块配置中显式启用 Redis Event Bus、Redis Locking Provider 和 Redis Workflow Engine。
-- 验证：数据库迁移已完成；API 容器已启动，模块切换后的镜像部署验证待完成。
+- 验证：数据库迁移已完成；API 容器日志确认 `event-bus-redis`、`locking-redis` 和 `workflow-engine-redis` 均已建立连接，容器健康检查通过。
 
 ## 2026-10-28 Storefront Docker 构建缺少路由类型生成
 
 - 现象：Storefront 容器构建在严格类型检查阶段报 `Cannot find module '@outlet/api/_generated'`。
 - 根因：本地根构建会先执行 API codegen，但 Storefront Dockerfile 只复制 API 的 `package.json`，没有复制固定路由清单和 codegen 脚本。
 - 修复：镜像构建时复制 `packages/api/scripts`，先执行 API codegen，再执行 Storefront production build。
-- 验证：修复后的镜像构建待重跑；API 独立构建已经通过。
+- 验证：修复后的 Storefront 镜像已完成生产构建并部署；本地全仓构建的 Storefront、Admin、Vendor 和 API 四个 package 全部通过。
 
 ## 2026-10-28 API 运行镜像工作目录找不到 Medusa CLI
 
 - 现象：API 容器循环重启，日志为 `sh: 1: medusa: not found`，并提示当前目录的 `package.json` 没有本地 `node_modules`。
 - 根因：生产 artifact 的 `node_modules` 位于 `/app/packages/api/node_modules`，而运行工作目录是 `/app/packages/api/.medusa/server`；通过 `pnpm start` 查找脚本二进制时没有沿用父目录的 workspace 链接。
 - 修复：保留 compiled server 工作目录，改用父目录中已安装的绝对路径 `/app/packages/api/node_modules/.bin/medusa` 启动。
-- 验证：重建 API runtime 镜像并重新启动容器后检查健康状态和启动日志。
+- 验证：重建 API runtime 镜像并重新启动容器后，`/health` 返回 `200 OK`，容器状态为 `healthy`。
 
 ## 2026-10-28 外部模型失败导致 Agent 只返回 error
 
 - 现象：云端完整冒烟中 Agent 接口返回 HTTP 200 和 SSE，但事件序列只有 `error`，没有 `tool_start`、`tool_result`、`token` 和 `done`。
 - 根因：配置了模型 Key 后 Agent 固定走外部模型；鉴权、超时或网络错误被顶层捕获后直接结束，没有复用已经实现的本地工具模式。
 - 修复：保留外部模型优先策略；模型请求失败时发送 `status(fallback)`，再执行本地只读工具并返回 `done(mode=demo)`，同时补一个 provider 401 回归测试。
-- 验证：`@outlet/api` 单元测试 6 个套件、15 个用例通过；云端 Agent SSE 需在重建 API 后复验。
+- 验证：`@outlet/api` 单元测试 6 个套件、15 个用例通过；云端 Agent SSE 已复验包含 `status`、`tool_start`、`tool_result`、`token` 和 `done`，外部模型不可用时可稳定降级为本地只读工具模式。
+
+## 2026-10-28 商品详情退货文案残留家具模板词
+
+- 现象：鞋类商品详情页的退货说明出现 `return the chair`，与当前商品类型不一致。
+- 根因：Storefront 继承的通用商品模板保留了家具类示例文案，数据接口本身没有返回这段文字。
+- 修复：将固定模板文案改为商品无关的 `return the item`，避免在不同品类下产生错误业务语义。
+- 验证：重新执行 Storefront TypeScript 检查和生产构建，并在公网商品详情页确认文案已更新。
 
 ## 2026-10-28 长构建同步轮询无退出条件，空耗上下文
 
