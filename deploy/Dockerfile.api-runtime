@@ -1,0 +1,5 @@
+FROM outlet-api-build:latest
+WORKDIR /app/packages/api/.medusa/server
+ENV NODE_ENV=production
+EXPOSE 9000
+CMD ["/app/packages/api/node_modules/.bin/medusa", "start"]

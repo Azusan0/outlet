@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dfe6d5"/>
+      <stop offset="1" stop-color="#91a18a"/>
+    </linearGradient>
+    <pattern id="lines" width="36" height="36" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <path d="M0 0v36" stroke="#22332a" stroke-opacity=".07"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="1500" fill="url(#bg)"/>
+  <rect width="1200" height="1500" fill="url(#lines)"/>
+  <path d="M0 860 310 610l220 160 220-330 450 440v620H0z" fill="#315e49"/>
+  <path d="M0 1050 290 820l180 130 250-190 480 360v380H0z" fill="#22332a"/>
+  <circle cx="980" cy="230" r="145" fill="none" stroke="#edf0e7" stroke-width="2"/>
+  <circle cx="980" cy="230" r="110" fill="none" stroke="#edf0e7" stroke-width="2"/>
+  <text x="80" y="145" fill="#22332a" font-family="Georgia,serif" font-size="26" letter-spacing="9">FIELD NOTES</text>
+  <text x="80" y="1320" fill="#edf0e7" font-family="Georgia,serif" font-size="170" letter-spacing="-12">02</text>
+</svg>

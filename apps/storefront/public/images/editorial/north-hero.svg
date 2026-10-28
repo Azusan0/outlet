@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e9e1d1"/>
+      <stop offset="1" stop-color="#b8a98e"/>
+    </linearGradient>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M44 0H0V44" fill="none" stroke="#20211e" stroke-opacity=".08"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="1500" fill="url(#bg)"/>
+  <rect width="1200" height="1500" fill="url(#grid)"/>
+  <circle cx="910" cy="280" r="270" fill="#ed4c2d" opacity=".92"/>
+  <path d="M120 1190C330 930 490 1040 640 830c150-210 280-310 440-270v660H120z" fill="#20211e"/>
+  <text x="90" y="150" fill="#20211e" font-family="Georgia,serif" font-size="28" letter-spacing="8">NORTH ARCHIVE</text>
+  <text x="90" y="1320" fill="#f3f0e8" font-family="Georgia,serif" font-size="170" letter-spacing="-12">02</text>
+</svg>

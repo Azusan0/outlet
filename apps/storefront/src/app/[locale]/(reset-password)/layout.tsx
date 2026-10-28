@@ -1,0 +1,27 @@
+import { Header } from "@/components/organisms/Header/Header"
+import { Footer } from "@/components/organisms/Footer/Footer"
+import { checkRegion } from "@/lib/helpers/check-region"
+import { redirect } from "next/navigation"
+
+export default async function ResetPasswordLayout({
+  children,
+  params,
+}: Readonly<{
+  children: React.ReactNode
+  params: Promise<{ locale: string }>
+}>) {
+  const { locale } = await params
+  const regionCheck = await checkRegion(locale)
+
+  if (!regionCheck) {
+    return redirect("/")
+  }
+
+  return (
+    <>
+      <Header locale={locale} />
+      {children}
+      <Footer />
+    </>
+  )
+}

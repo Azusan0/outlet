@@ -1,0 +1,44 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+allowBuilds:
+  '@medusajs/telemetry': true
+  '@swc/core': true
+  core-js-pure: true
+  esbuild: true
+  msgpackr-extract: true
+  protobufjs: true
+  sharp: true
+  unrs-resolver: true
+
+overrides:
+  "@medusajs/admin-sdk": "2.21.2"
+  "@medusajs/admin-shared": "2.21.2"
+  "@medusajs/cli": "2.21.2"
+  "@medusajs/core-flows": "2.21.2"
+  "@medusajs/dashboard": "2.21.2"
+  "@medusajs/draft-order": "2.21.2"
+  "@medusajs/framework": "2.21.2"
+  "@medusajs/icons": "2.21.2"
+  "@medusajs/medusa": "2.21.2"
+  "@medusajs/test-utils": "2.21.2"
+  "@medusajs/types": "2.21.2"
+  "@medusajs/ui": "4.2.3"
+  "@opentelemetry/api": "1.9.0"
+  "@tiptap/core": "3.32.0"
+  "@tiptap/pm": "3.32.0"
+  "fdir": "6.5.0"
+  "react-remove-scroll": "2.7.2"
+  "vite": "7.3.7"
+  "zod": "4.4.3"
+
+onlyBuiltDependencies:
+  - "@medusajs/telemetry"
+  - "@swc/core"
+  - "core-js-pure"
+  - "esbuild"
+  - "msgpackr-extract"
+  - "protobufjs"
+  - "sharp"
+  - "unrs-resolver"

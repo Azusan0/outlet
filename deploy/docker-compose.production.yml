@@ -1,0 +1,55 @@
+name: outlet
+
+services:
+  api:
+    image: outlet-api:latest
+    build:
+      context: ..
+      dockerfile: packages/api/Dockerfile
+      args:
+        MERCUR_BACKEND_URL: ${PUBLIC_API_URL}
+    env_file:
+      - /home/ubuntu/outlet/api.env
+    environment:
+      DATABASE_HOST: outlet-db
+      DATABASE_PORT: "5432"
+      REDIS_HOST: outlet-redis
+    ports:
+      - "127.0.0.1:9001:9000"
+    networks:
+      - outlet-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+
+  storefront:
+    image: outlet-storefront:latest
+    build:
+      context: ..
+      dockerfile: apps/storefront/Dockerfile
+      args:
+        MEDUSA_BACKEND_URL: http://api:9000
+        NEXT_PUBLIC_BASE_PATH: /outlet
+        NEXT_PUBLIC_BASE_URL: ${PUBLIC_STOREFRONT_URL}
+        NEXT_PUBLIC_VENDOR_URL: ${PUBLIC_VENDOR_URL}
+    environment:
+      MEDUSA_BACKEND_URL: http://api:9000
+      OUTLET_BOOTSTRAP_KEY: ${OUTLET_BOOTSTRAP_KEY}
+      OUTLET_DEFAULT_TENANT: north
+      REVALIDATE_SECRET: ${STOREFRONT_REVALIDATE_SECRET}
+    ports:
+      - "127.0.0.1:3100:3000"
+    networks:
+      - outlet-net
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  outlet-net:
+    external: true
+    name: outlet-net

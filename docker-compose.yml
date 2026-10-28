@@ -1,0 +1,49 @@
+name: outlet
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+      args:
+        MERCUR_BACKEND_URL: ${PUBLIC_URL:-http://localhost:9000}
+    env_file:
+      - packages/api/.env
+    ports:
+      - "127.0.0.1:9001:9000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9000/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - outlet_redis:/data
+
+  storefront:
+    build:
+      context: .
+      dockerfile: apps/storefront/Dockerfile
+    environment:
+      MEDUSA_BACKEND_URL: http://api:9000
+      OUTLET_BOOTSTRAP_KEY: ${OUTLET_BOOTSTRAP_KEY}
+      OUTLET_DEFAULT_TENANT: north
+      REVALIDATE_SECRET: ${STOREFRONT_REVALIDATE_SECRET}
+    ports:
+      - "127.0.0.1:3100:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  outlet_redis:
