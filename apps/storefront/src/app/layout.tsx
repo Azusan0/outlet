@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 
 import './globals.css';
 
@@ -27,8 +28,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const cart = await retrieveCart();
-  const tenant = await getTenant().catch(() => null);
+  const requestHeaders = await headers();
+  const hasTenantContext = Boolean(requestHeaders.get('x-outlet-tenant-id'));
+  const tenant = hasTenantContext ? await getTenant().catch(() => null) : null;
+  const cart = tenant ? await retrieveCart() : null;
 
   // HtmlLangSetter follows the active route locale after hydration.
   const htmlLang = 'zh-CN';
@@ -37,7 +40,7 @@ export default async function RootLayout({
     <html lang={htmlLang}>
       <body className="relative bg-primary text-secondary antialiased">
         <HtmlLangSetter />
-        <StorefrontTheme>
+        <StorefrontTheme fallback={!tenant}>
           <Providers cart={cart} tenantSlug={tenant?.slug || 'north'}>
             {children}
           </Providers>

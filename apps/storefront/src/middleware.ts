@@ -53,6 +53,11 @@ export async function middleware(request: NextRequest) {
   let tenant: TenantIndexItem | undefined
   let rewritePath = pathname
 
+  // The public workspace demo is intentionally outside the tenant storefront.
+  if (first === 'portal') {
+    return NextResponse.next()
+  }
+
   if (first === 'de') {
     const slug = pathname.split('/')[2] || defaultTenant()
     tenant = (await tenantIndex()).find((item) => item.slug === slug)

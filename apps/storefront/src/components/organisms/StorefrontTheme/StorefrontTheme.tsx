@@ -2,8 +2,20 @@ import type { CSSProperties, ReactNode } from 'react'
 
 import { getStorefrontConfig } from '@/lib/tenant'
 
-export const StorefrontTheme = async ({ children }: { children: ReactNode }) => {
-  const { theme } = await getStorefrontConfig()
+const fallbackTheme = {
+  accent: '#e45a36',
+  paper: '#f3f0e8',
+  ink: '#20211e',
+}
+
+export const StorefrontTheme = async ({
+  children,
+  fallback = false,
+}: {
+  children: ReactNode
+  fallback?: boolean
+}) => {
+  const theme = fallback ? fallbackTheme : (await getStorefrontConfig()).theme
   const style = {
     '--outlet-paper': theme.paper,
     '--outlet-ink': theme.ink,
