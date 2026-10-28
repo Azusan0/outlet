@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 
 import { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 import PaymentWrapper from '@/components/organisms/PaymentContainer/PaymentWrapper';
 import { CartAddressSection } from '@/components/sections/CartAddressSection/CartAddressSection';
@@ -12,6 +12,7 @@ import { retrieveCart } from '@/lib/data/cart';
 import { retrieveCustomer } from '@/lib/data/customer';
 import { listCartShippingMethods } from '@/lib/data/fulfillment';
 import { listCartPaymentMethods } from '@/lib/data/payment';
+import { getTenant } from '@/lib/tenant';
 
 export const metadata: Metadata = {
   title: 'Checkout',
@@ -39,6 +40,14 @@ async function CheckoutPageContent({}) {
   const shippingMethods = await listCartShippingMethods(cart.id, false);
   const paymentMethods = await listCartPaymentMethods(cart.region?.id ?? '');
   const customer = await retrieveCustomer();
+
+  if (!customer) {
+    const tenant = await getTenant();
+    const returnPath = `/${tenant.slug}/checkout`;
+    redirect(
+      `/${tenant.slug}/login?redirect=${encodeURIComponent(returnPath)}&sessionRequired=true`
+    );
+  }
 
   return (
     <PaymentWrapper cart={cart}>

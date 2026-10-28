@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { normalizeCacheId } from './lib/request-cache.mjs'
 
 type TenantIndexItem = {
   id: string
@@ -82,11 +83,16 @@ export async function middleware(request: NextRequest) {
   const response = NextResponse.rewrite(rewriteUrl, {
     request: { headers: requestHeaders },
   })
-  const cacheId = request.cookies.get('_medusa_cache_id')?.value || crypto.randomUUID()
-  response.cookies.set('_medusa_cache_id', `${tenant.slug}-${cacheId}`, {
-    maxAge: 60 * 60 * 24,
-    sameSite: 'lax',
-  })
+  const existingCacheId = request.cookies.get('_medusa_cache_id')?.value
+  const cacheId = normalizeCacheId(existingCacheId, () => crypto.randomUUID())
+  if (existingCacheId !== cacheId) {
+    response.cookies.set('_medusa_cache_id', cacheId, {
+      maxAge: 60 * 60 * 24,
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+    })
+  }
   return response
 }
 

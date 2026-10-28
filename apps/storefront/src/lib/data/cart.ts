@@ -18,6 +18,81 @@ import {
 } from './cookies';
 import { getRegion } from './regions';
 
+type CartOfferSeller = {
+  id: string
+  name: string
+  handle: string
+  logo: string | null
+  created_at: Date
+}
+
+type CartLineItemWithOffer = HttpTypes.StoreCartLineItem & {
+  offer?: {
+    id: string
+    seller_id: string
+    seller?: CartOfferSeller
+  }
+}
+
+type CartWithOfferDetails = Omit<HttpTypes.StoreCart, 'items'> & {
+  items?: CartLineItemWithOffer[]
+}
+
+async function attachCartOffers(
+  cart: HttpTypes.StoreCart,
+  headers: Record<string, string>
+): Promise<HttpTypes.StoreCart> {
+  const offerIds = [
+    ...new Set(
+      (cart.items ?? [])
+        .map((item) => item.metadata?.offer_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    ),
+  ]
+
+  if (!offerIds.length) {
+    return cart
+  }
+
+  try {
+    const { offers } = (await sdk.store.offers.query({
+      id: offerIds,
+      limit: offerIds.length,
+      fields: '+seller.id,+seller.name,+seller.handle,+seller.logo,+seller.created_at',
+      fetchOptions: { headers, cache: 'no-store' },
+    } as never)) as unknown as {
+      offers: Array<{
+        id: string
+        seller_id: string
+        seller?: CartOfferSeller
+      }>
+    }
+    const offersById = new Map(offers.map((offer) => [offer.id, offer]))
+    const enrichedCart = {
+      ...cart,
+      items: cart.items?.map((item) => {
+        const offerId = item.metadata?.offer_id
+        const offer = typeof offerId === 'string' ? offersById.get(offerId) : undefined
+        return offer
+          ? {
+              ...item,
+              offer: {
+                id: offer.id,
+                seller_id: offer.seller_id,
+                seller: offer.seller,
+              },
+            }
+          : item
+      }),
+    }
+
+    return enrichedCart as CartWithOfferDetails
+  } catch (error) {
+    console.error('Failed to enrich cart offers', error)
+    return cart
+  }
+}
+
 export async function retrieveCart(cartId?: string) {
   const id = cartId || (await getCartId());
 
@@ -34,11 +109,10 @@ export async function retrieveCart(cartId?: string) {
       $id: id,
       fields:
         '*items,*region, *items.product, *items.variant, *items.variant.options,' +
-        '*items.thumbnail, *items.metadata, +items.total, *promotions, +shipping_methods.name, *items.offer, *items.offer.seller' +
-        '',
+        '*items.thumbnail, *items.metadata, +items.total, *promotions, +shipping_methods.name',
       fetchOptions: { headers, cache: 'no-cache' }
     })
-    .then(({ cart }) => cart)
+    .then(({ cart }) => attachCartOffers(cart, headers))
     .catch(error => {
       console.error('Failed to retrieve cart', error);
       return null;
@@ -418,7 +492,7 @@ export async function placeOrder(cartId?: string) {
   if (res.data?.order_group) {
     revalidatePath('/user/reviews');
     revalidatePath('/user/orders');
-    removeCartId();
+    await removeCartId();
     // The completed cart splits into one order group (many per-seller orders).
     // Send the shopper to the order-group detail page, which renders every
     // child order + aggregated totals. `order_group.id` is always present;

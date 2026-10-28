@@ -115,6 +115,7 @@ export async function login(formData: FormData) {
       .mutate({ $actorType: 'customer', $authProvider: 'emailpass', email, password } as never) as unknown as Promise<{ token: string }>)
       .then(({ token }) => token);
     await setAuthToken(token as string);
+    await transferCart();
     const customerCacheTag = await getCacheTag('customers');
     revalidateTag(customerCacheTag);
 

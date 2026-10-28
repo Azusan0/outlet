@@ -7,6 +7,7 @@ import { redirect } from "next/navigation"
 import { format } from "date-fns"
 import { retrieveOrderGroup } from "@/lib/data/orders"
 import { OrderDetailsSection } from "@/components/sections/OrderDetailsSection/OrderDetailsSection"
+import { getTenant } from "@/lib/tenant"
 
 export default async function UserPage({
   params,
@@ -16,9 +17,14 @@ export default async function UserPage({
   const { id } = await params
 
   const user = await retrieveCustomer()
+  if (!user) {
+    const tenant = await getTenant()
+    const returnPath = `/${tenant.slug}/user/orders/${id}`
+    return redirect(
+      `/${tenant.slug}/login?redirect=${encodeURIComponent(returnPath)}&sessionExpired=true`
+    )
+  }
   const orderGroup = (await retrieveOrderGroup(id)) as any
-
-  if (!user) return redirect("/login")
 
   return (
     <main className="container">

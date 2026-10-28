@@ -44,6 +44,30 @@ type ProductChannelLink = {
   sales_channel_id: string;
 };
 
+type InventoryLevelRecord = {
+  stocked_quantity?: number | string;
+  reserved_quantity?: number | string;
+  stock_locations?: Array<{
+    name?: string | null;
+    sales_channels?: Array<{ id: string }>;
+  }>;
+};
+
+type OfferInventoryRecord = {
+  id: string;
+  product_id: string;
+  variant_id?: string | null;
+  seller_id: string;
+  inventory_items?: Array<{
+    inventory?: {
+      id: string;
+      sku?: string | null;
+      title?: string | null;
+      location_levels?: InventoryLevelRecord[];
+    } | null;
+  }>;
+};
+
 function numberValue(value: number | string | undefined): number {
   const parsed = typeof value === "string" ? Number.parseFloat(value) : value;
   return Number.isFinite(parsed) ? Number(parsed) : 0;
@@ -62,18 +86,24 @@ function textValue(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
-async function loadProducts(context: ToolContext): Promise<ProductRecord[]> {
+async function loadProducts(
+  context: ToolContext,
+  knownProductIds?: string[],
+): Promise<ProductRecord[]> {
   const query = context.scope.resolve(ContainerRegistrationKeys.QUERY);
-  const { data: links } = await query.graph({
-    entity: "product_sales_channel",
-    fields: ["product_id", "sales_channel_id"],
-    filters: {
-      sales_channel_id: [context.tenant.sales_channel_id],
-    },
-  });
-  const productIds = [
-    ...new Set((links as ProductChannelLink[]).map((link) => link.product_id)),
-  ];
+  let productIds = knownProductIds;
+  if (!productIds) {
+    const { data: links } = await query.graph({
+      entity: "product_sales_channel",
+      fields: ["product_id", "sales_channel_id"],
+      filters: {
+        sales_channel_id: [context.tenant.sales_channel_id],
+      },
+    });
+    productIds = [
+      ...new Set((links as ProductChannelLink[]).map((link) => link.product_id)),
+    ];
+  }
   if (!productIds.length) return [];
 
   const { data } = await query.graph({
@@ -228,29 +258,31 @@ async function inventoryHealth(
     };
   }
 
-  const { data } = await query.graph({
-    entity: "product",
+  const products = await loadProducts(context, productIds);
+  const productsById = new Map(products.map((product) => [product.id, product]));
+  const { data: offers } = await query.graph({
+    entity: "offer",
     fields: [
       "id",
-      "title",
-      "sales_channels.id",
-      "variants.id",
-      "variants.sku",
-      "variants.title",
-      "variants.inventory_items.inventory.id",
-      "variants.inventory_items.inventory.sku",
-      "variants.inventory_items.inventory.title",
-      "variants.inventory_items.inventory.location_levels.stocked_quantity",
-      "variants.inventory_items.inventory.location_levels.reserved_quantity",
-      "variants.inventory_items.inventory.location_levels.stock_locations.name",
-      "variants.inventory_items.inventory.location_levels.stock_locations.sales_channels.id",
+      "product_id",
+      "variant_id",
+      "seller_id",
+      "inventory_items.inventory.id",
+      "inventory_items.inventory.sku",
+      "inventory_items.inventory.title",
+      "inventory_items.inventory.location_levels.stocked_quantity",
+      "inventory_items.inventory.location_levels.reserved_quantity",
+      "inventory_items.inventory.location_levels.stock_locations.name",
+      "inventory_items.inventory.location_levels.stock_locations.sales_channels.id",
     ],
     filters: {
-      id: productIds,
+      product_id: productIds,
     },
   });
 
   const items: Array<{
+    offer_id: string;
+    seller_id: string;
     product_id: string;
     product_title: string;
     variant_id: string;
@@ -262,34 +294,36 @@ async function inventoryHealth(
     low_stock: boolean;
   }> = [];
 
-  for (const product of data as ProductRecord[]) {
-    for (const variant of product.variants ?? []) {
-      for (const link of variant.inventory_items ?? []) {
-        const inventory = link.inventory;
-        for (const level of inventory?.location_levels ?? []) {
-          const belongsToTenant = (level.stock_locations ?? []).some(
-            (location) =>
-              (location.sales_channels ?? []).some(
-                (channel) => channel.id === context.tenant.sales_channel_id,
-              ),
-          );
-          if (!belongsToTenant) continue;
+  for (const offer of offers as OfferInventoryRecord[]) {
+    const product = productsById.get(offer.product_id);
+    const variant = product?.variants?.find((item) => item.id === offer.variant_id);
+    for (const link of offer.inventory_items ?? []) {
+      const inventory = link.inventory;
+      for (const level of inventory?.location_levels ?? []) {
+        const belongsToTenant = (level.stock_locations ?? []).some(
+          (location) =>
+            (location.sales_channels ?? []).some(
+              (channel) => channel.id === context.tenant.sales_channel_id,
+            ),
+        );
+        if (!belongsToTenant) continue;
 
-          const stocked = numberValue(level.stocked_quantity);
-          const reserved = numberValue(level.reserved_quantity);
-          const available = stocked - reserved;
-          items.push({
-            product_id: product.id,
-            product_title: product.title,
-            variant_id: variant.id,
-            sku: inventory?.sku ?? variant.sku ?? null,
-            location: level.stock_locations?.[0]?.name ?? null,
-            stocked_quantity: stocked,
-            reserved_quantity: reserved,
-            available_quantity: available,
-            low_stock: available <= threshold,
-          });
-        }
+        const stocked = numberValue(level.stocked_quantity);
+        const reserved = numberValue(level.reserved_quantity);
+        const available = stocked - reserved;
+        items.push({
+          offer_id: offer.id,
+          seller_id: offer.seller_id,
+          product_id: offer.product_id,
+          product_title: product?.title ?? offer.product_id,
+          variant_id: offer.variant_id ?? variant?.id ?? "",
+          sku: inventory?.sku ?? variant?.sku ?? null,
+          location: level.stock_locations?.[0]?.name ?? null,
+          stocked_quantity: stocked,
+          reserved_quantity: reserved,
+          available_quantity: available,
+          low_stock: available <= threshold,
+        });
       }
     }
   }
@@ -433,11 +467,26 @@ async function knowledgeSearch(
   };
 }
 
+// OpenAI-compatible providers restrict function names to letters, numbers,
+// underscores, and hyphens. Keep dotted names internally for readable audit
+// events, but expose provider-safe aliases at the protocol boundary.
+const PROVIDER_TOOL_NAMES: Record<string, string> = {
+  order_diagnose: "order.diagnose",
+  catalog_search: "catalog.search",
+  inventory_health: "inventory.health",
+  erp_preview: "erp.preview",
+  knowledge_search: "knowledge.search",
+};
+
+export function toInternalToolName(name: string): string {
+  return PROVIDER_TOOL_NAMES[name] ?? name;
+}
+
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
-      name: "order.diagnose",
+      name: "order_diagnose",
       description:
         "Read an order and its fulfillment state in the current tenant. Use for order, shipment, delivery, and tracking diagnosis. Never changes an order.",
       parameters: {
@@ -452,7 +501,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
-      name: "catalog.search",
+      name: "catalog_search",
       description:
         "Search products in the current tenant catalog. Use for product, SKU, price, or assortment questions.",
       parameters: {
@@ -471,7 +520,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
-      name: "inventory.health",
+      name: "inventory_health",
       description:
         "Read stock levels for the current tenant and identify low-stock or overstocked variants.",
       parameters: {
@@ -491,7 +540,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
-      name: "erp.preview",
+      name: "erp_preview",
       description:
         "Create a persisted dry-run ERP sync preview and audit record for stock, price, or ERP review. This tool always forces dry_run and never writes to the ERP.",
       parameters: {
@@ -525,7 +574,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: "function",
     function: {
-      name: "knowledge.search",
+      name: "knowledge_search",
       description:
         "Search the tenant knowledge base for SOPs, policies, supplier notes, and operational documents. Always cite returned document_id and chunk_id.",
       parameters: {
@@ -545,7 +594,7 @@ export async function executeTool(
   args: Record<string, unknown>,
   context: ToolContext,
 ): Promise<unknown> {
-  switch (name) {
+  switch (toInternalToolName(name)) {
     case "catalog.search":
       return catalogSearch(context, args);
     case "inventory.health":

@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
     }
   },
   images: {
+    loader: 'custom',
+    loaderFile: './src/lib/image-loader.mjs',
     dangerouslyAllowSVG: true,
     contentDispositionType: 'attachment',
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",

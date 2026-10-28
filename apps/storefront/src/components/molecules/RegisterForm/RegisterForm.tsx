@@ -13,9 +13,12 @@ import { registerFormSchema, RegisterFormData } from "./schema"
 import { signup } from "@/lib/data/customer"
 import { useState } from "react"
 import { Container } from "@medusajs/ui"
-import Link from "next/link"
 import { PasswordValidator } from "@/components/cells/PasswordValidator/PasswordValidator"
 import { toast } from "@/lib/helpers/toast"
+import { tenantInternalPath } from "@/lib/helpers/safe-redirect"
+import { useRouter, useSearchParams } from "next/navigation"
+import LocalizedClientLink from "@/components/molecules/LocalizedLink/LocalizedLink"
+import { useTenantSlug } from "@/components/providers"
 
 export const RegisterForm = () => {
   const methods = useForm<RegisterFormData>({
@@ -37,6 +40,10 @@ export const RegisterForm = () => {
 }
 
 const Form = () => {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const tenantSlug = useTenantSlug()
+  const redirectTo = tenantInternalPath(tenantSlug, searchParams.get("redirect"))
   const [passwordError, setPasswordError] = useState({
     isValid: false,
     lower: false,
@@ -65,6 +72,12 @@ const Form = () => {
     formData.append("phone", data.phone)
 
     const res = await signup(formData)
+
+    if (res && res?.id) {
+      router.replace(redirectTo)
+      router.refresh()
+      return
+    }
 
     if (res && !res?.id) {
 
@@ -147,14 +160,17 @@ const Form = () => {
         <h2 className="heading-md text-primary uppercase mb-8">
           Already have an account?
         </h2>
-        <Link href="/login" data-testid="register-login-link">
+        <LocalizedClientLink
+          href={`/login?redirect=${encodeURIComponent(redirectTo)}`}
+          data-testid="register-login-link"
+        >
           <Button
             variant="tonal"
             className="w-full flex justify-center mt-8 uppercase"
           >
             Log in
           </Button>
-        </Link>
+        </LocalizedClientLink>
       </Container>
     </main>
   )

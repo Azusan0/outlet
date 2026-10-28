@@ -8,7 +8,10 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types",
     "generate:template": "node ./scripts/generate-import-template.mjs",
-    "test:tenant-client": "node --test apps/storefront/src/lib/__tests__/tenant-client.test.mjs"
+    "test:tenant-client": "node --test apps/storefront/src/lib/__tests__/tenant-client.test.mjs",
+    "test:cookie-security": "node --test apps/storefront/src/lib/__tests__/cookie-security.test.mjs",
+    "test:request-cache": "node --test apps/storefront/src/lib/__tests__/request-cache.test.mjs",
+    "test:image-loader": "node --test apps/storefront/src/lib/__tests__/image-loader.test.mjs"
   },
   "dependencies": {
     "react": "18.3.1",

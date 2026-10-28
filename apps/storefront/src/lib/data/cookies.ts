@@ -1,6 +1,13 @@
 import 'server-only';
 import { cookies as nextCookies } from 'next/headers';
 import { getTenant } from '../tenant';
+import { shouldSecureCookies } from '../cookie-security.mjs';
+import { buildCacheTag } from '../request-cache.mjs';
+
+const secureCookies = () => shouldSecureCookies(
+  process.env.NEXT_PUBLIC_BASE_URL,
+  process.env.NODE_ENV
+);
 
 export const getAuthHeaders = async (): Promise<
   { authorization: string } | {}
@@ -26,7 +33,8 @@ export const getCacheTag = async (
       return '';
     }
 
-    return `${tag}-${cacheId}`;
+    const tenant = await getTenant();
+    return buildCacheTag(tag, tenant.slug, cacheId);
   } catch (error) {
     return '';
   }
@@ -54,7 +62,8 @@ export const setAuthToken = async (token: string) => {
     maxAge: 60 * 60 * 24 * 7,
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: secureCookies(),
+    path: '/',
   });
 };
 
@@ -62,6 +71,7 @@ export const removeAuthToken = async () => {
   const cookies = await nextCookies();
   cookies.set('_medusa_jwt', '', {
     maxAge: -1,
+    path: '/',
   });
 };
 
@@ -78,7 +88,8 @@ export const setCartId = async (cartId: string) => {
     maxAge: 60 * 60 * 24 * 7,
     httpOnly: true,
     sameSite: 'strict',
-    secure: process.env.NODE_ENV === 'production',
+    secure: secureCookies(),
+    path: '/',
   });
 };
 
@@ -87,5 +98,6 @@ export const removeCartId = async () => {
   const tenant = await getTenant();
   cookies.set(`_outlet_cart_${tenant.slug}`, '', {
     maxAge: -1,
+    path: '/',
   });
 };

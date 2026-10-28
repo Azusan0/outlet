@@ -1,6 +1,6 @@
 import { getAiConfig } from "./config";
 import { streamChatCompletion } from "./llm";
-import { executeTool, TOOL_DEFINITIONS } from "./tools";
+import { executeTool, toInternalToolName, TOOL_DEFINITIONS } from "./tools";
 import type {
   AgentEvent,
   AgentHistoryItem,
@@ -255,21 +255,22 @@ export async function* runOperationsAgent(input: {
       });
 
       for (const call of toolCalls) {
+        const internalName = toInternalToolName(call.function.name);
         let args: Record<string, unknown> = {};
         try {
           args = parseArguments(call.function.arguments);
           yield {
             type: "tool_start",
-            name: call.function.name,
+            name: internalName,
             arguments: args,
           };
           const result = await executeToolWithTimeout(
-            call,
+            { ...call, function: { ...call.function, name: internalName } },
             args,
             input.context,
           );
           citations.push(...extractCitations(result));
-          yield { type: "tool_result", name: call.function.name, result };
+          yield { type: "tool_result", name: internalName, result };
           messages.push({
             role: "tool",
             tool_call_id: call.id,
@@ -281,7 +282,7 @@ export async function* runOperationsAgent(input: {
             error:
               error instanceof Error ? error.message : "Tool execution failed",
           };
-          yield { type: "tool_result", name: call.function.name, result };
+          yield { type: "tool_result", name: internalName, result };
           messages.push({
             role: "tool",
             tool_call_id: call.id,

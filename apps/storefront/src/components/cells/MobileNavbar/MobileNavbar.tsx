@@ -37,7 +37,7 @@ export const MobileNavbar = ({
 
   return (
     <div
-      className="lg:hidden"
+      className="xl:hidden"
       data-testid="mobile-navbar"
     >
       <div

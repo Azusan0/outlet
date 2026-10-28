@@ -3,15 +3,17 @@
 import { useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FieldError, FieldValues, FormProvider, useForm, useFormContext } from 'react-hook-form';
 
 import { Button } from '@/components/atoms';
 import { Alert } from '@/components/atoms/Alert/Alert';
 import { LabeledInput } from '@/components/cells';
-import { login, transferCart } from '@/lib/data/customer';
+import { login } from '@/lib/data/customer';
 import { toast } from '@/lib/helpers/toast';
+import { tenantInternalPath } from '@/lib/helpers/safe-redirect';
+import LocalizedClientLink from '@/components/molecules/LocalizedLink/LocalizedLink';
+import { useTenantSlug } from '@/components/providers';
 
 import { LoginFormData, loginFormSchema } from './schema';
 
@@ -40,8 +42,10 @@ const Form = () => {
   } = useFormContext();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const tenantSlug = useTenantSlug();
   const isSessionExpired = searchParams.get('sessionExpired') === 'true';
   const isSessionRequired = searchParams.get('sessionRequired') === 'true';
+  const redirectTo = tenantInternalPath(tenantSlug, searchParams.get('redirect'));
 
   const submit = async (data: FieldValues) => {
     const formData = new FormData();
@@ -51,14 +55,13 @@ const Form = () => {
     const res = await login(formData);
 
     if (res.success) {
-      router.push('/user');
-      await transferCart();
+      router.replace(redirectTo);
+      router.refresh();
     } else {
       toast.error({ title: res.message || 'An error occurred. Please try again.' });
     }
 
     setIsAuthError(false);
-    router.push('/user');
   };
 
   const clearApiError = () => {
@@ -128,13 +131,13 @@ const Form = () => {
               />
             </div>
 
-            <Link
+            <LocalizedClientLink
               href="/forgot-password"
               className="label-md mt-4 block text-right uppercase text-action-on-secondary"
               data-testid="login-forgot-password-link"
             >
               Forgot your password?
-            </Link>
+            </LocalizedClientLink>
 
             <Button
               className="mt-8 w-full uppercase"
@@ -150,8 +153,8 @@ const Form = () => {
           <h2 className="heading-md mb-4 uppercase text-primary">
             Don&apos;t have an account yet?
           </h2>
-          <Link
-            href="/register"
+          <LocalizedClientLink
+            href={`/register?redirect=${encodeURIComponent(redirectTo)}`}
             data-testid="login-register-link"
           >
             <Button
@@ -160,7 +163,7 @@ const Form = () => {
             >
               Create account
             </Button>
-          </Link>
+          </LocalizedClientLink>
         </div>
       </div>
     </main>

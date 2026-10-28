@@ -17,7 +17,12 @@
 | 多租户隔离 | 路由未强制租户关系过滤 | 框架 filter 不自动等于最终资源边界 |
 | 多租户隔离 | Store SDK 未注入租户凭证且构建跳过类型错误 | `fetchOptions` 不接受自定义 `fetch`，全局 sdk 串租户 |
 | 业务数据一致性 | Offer 价格导入改写共享 Variant PriceSet | 先重写 Variant 价格删掉了 Offer 专属价格链接 |
+| 业务数据一致性 | Excel 提交用部分 Variant 更新商品 | 更新工作流把未提交的同商品 Variant 当成删除项 |
+| 业务数据一致性 | 库存工具和导入查错 Offer 库存关系 | Marketplace 库存挂在 Offer 的 `inventory_items.inventory`，不是 Variant 的 `inventory_item_link` |
 | 业务数据一致性 | 库存地点销售渠道关联用错工作流 | 该关系须用专门的 link 工作流，不能按普通 link 猜 schema |
+| 接口契约 | Excel 预览行标识依赖字段别名 | 后端只返回 `id`，前端同时兼容多种别名，部署版本容易漂移 |
+| 购物车 | 刷新后明细消失且 Seller 显示 `undefined` | HTTP 下强制 Secure Cookie、删除未 await，且行项目未补齐 Seller |
+| 订单读取 | 订单详情关系过深且 `fields` 数组被 SDK 编码 | 默认展开超过 3 层，数组参数被编码成 `fields[0]` |
 | 运行时配置 | Medusa 未使用已配置的 Redis | `REDIS_URL` 未映射到 `projectConfig.redisUrl` |
 | 部署与运行 | API 运行镜像找不到 Medusa CLI | 运行目录与 `node_modules` 目录不一致，未沿用 workspace 链接 |
 | 容错与降级 | 外部模型失败导致 Agent 只返回 error | 失败被顶层捕获后直接结束，未复用本地工具降级 |
@@ -177,4 +182,47 @@
 - **先看权威现状再改代码**：远程问题先 `ps`、日志、容器状态、`docker images` 对齐事实，再决定动作。
 - **每个修复都留可复现的验证**：记录触发路径和验证命令，避免"看起来好了"。
 - **边界问题优先**：多租户、幂等、容错、可复现构建，这些比单个语法错误更能体现工程能力。
+
+## 2026-10-28 DeepSeek 工具名含点号导致 400 并误走 fallback
+
+- **现象**：云端 Agent 接口返回 HTTP 200，SSE 也包含工具事件，但 `done.mode` 为 `demo`，实际没有完成 DeepSeek 工具调用；状态事件中的原始错误为 `Invalid 'tools[0].function.name'`。
+- **根因**：OpenAI-compatible 工具协议要求函数名匹配 `^[a-zA-Z0-9_-]+$`，此前把便于审计展示的 `knowledge.search`、`inventory.health` 等点号名称直接发送给 DeepSeek，导致 provider 在请求校验阶段返回 HTTP 400；Agent 随后按设计降级到本地工具模式。
+- **修复**：对外协议改用 `knowledge_search`、`inventory_health`、`catalog_search`、`order_diagnose`、`erp_preview`，服务端收到工具调用后通过映射恢复内部点号名称；SSE 和审计继续展示可读的业务名称。
+- **验证**：本地新增工具调用回归测试；重新构建并替换云端 API runtime 镜像后，真实请求返回 `done.mode=ai`，事件包含 `token`、`tool_start`、`tool_result`、`done`，且不再出现 fallback。
+
+## 2026-10-28 HTTP 演示站购物车刷新后为空且 Seller 为 `undefined`
+
+- **现象**：商品可加入购物车，但刷新后行项目消失；部分购物车和结账视图中的 Seller 显示 `undefined`。
+- **根因**：HTTP 演示入口仍写入 `Secure` Cookie，浏览器不会在后续 HTTP 请求中发送；删除 Cookie 的异步调用未 `await`；购物车行项目只读取了变体关系，没有从当前租户的 Offer/Seller 关系补齐卖家。
+- **处理**：根据公开入口协议决定 Cookie 的 `Secure` 属性；删除 Cookie 改为等待完成；购物车读取时按 Offer 和租户 Seller 映射补齐真实卖家，并保留未登录结账跳转登录及登录后回跳。
+- **验证**：`pnpm test:cookie-security` 的 3 个用例通过；浏览器复验加入商品后刷新仍能看到行项目，Seller 显示实际店铺名而不是 `undefined`。
+
+## 2026-10-28 Excel 预览有数据但提交时报 `row_ids` 无效
+
+- **现象**：预览接口返回 HTTP 201、`total=2`、`valid=2`，提交却返回 `row_ids must be an array of at most 2000 non-empty strings`；页面调试对象中的 `row_id` 和 `status` 可能为空。
+- **根因**：持久化行使用 `id` 表示行标识且没有显式 `status`；前端依赖 `row_id`、`rowId`、`id` 等多个别名做兼容，部署版本与接口契约发生漂移后生成了空字符串。
+- **处理**：后端预览响应显式返回 `row_id` 和 `status`，同时保留内部 `id` 供批次存储和提交使用；前端继续兼容旧字段，避免历史批次失效。
+- **验证**：云端原预览接口 HTTP 201 且真实返回 `id=row_2`；修复后 API 单元测试和 TypeScript 检查通过。该契约修复尚未发布到本轮冻结的公网镜像。
+
+## 2026-10-28 Agent 库存为 0 且 Excel 提示 Offer 没有库存层级
+
+- **现象**：数据库存在库存记录，但 Agent 库存工具返回 0 条；Excel 提交提示 `Offer ... has no inventory level to update`。
+- **根因**：Marketplace 的库存挂在 Offer 的 `inventory_items.inventory.location_levels` 上，原实现查询了 Variant 的 `inventory_item_link`，关系路径与 Mercur 数据模型不一致。
+- **处理**：Agent 和 Excel 导入统一从 Offer 的 `inventory_items.inventory` 读取库存层级，并按当前租户 Sales Channel 关联的库存地点过滤。
+- **验证**：数据库直查确认目标 Offer 存在库存层级；新增库存工具和导入工作流单测，`pnpm --filter @outlet/api test:unit` 当前 7 个套件、19 个用例通过。云端新镜像和真实 Agent/导入结果仍待下次发布复验。
+
+## 2026-10-28 Excel 更新商品时误删同商品其他变体
+
+- **现象**：两行商品更新提交后均失败，其中第二行报条码已存在；进一步检查发现同一商品只留下目标尺码，其他尺码的 Variant 已消失。
+- **根因**：`updateProductsWorkflow` 收到只包含目标变体的 `variants` 数组，并把它当作该商品的完整变体集合处理，未出现的同商品变体被删除。测试文件还让两个不同 SKU 共用同一测试条码，触发 `product_variant` 的条码唯一索引。
+- **处理**：商品名称改用独立的商品字段更新；条码只在值与当前 Variant 不同时调用 `updateProductVariantsWorkflow` 更新单个变体；不再向商品工作流提交部分 `variants` 数组。
+- **验证**：新增回归测试覆盖“不提交部分变体数组”“条码未变化不更新”“库存层级可更新”；API 测试 19 个用例和 `tsc --noEmit` 通过。
+- **已知限制**：本轮冻结前没有继续修复合成演示数据中被删除的同商品变体，也没有重新执行真实 Excel 提交；共用条码仍应被数据库唯一约束拒绝，不能在未确认业务规则前自动合并或覆盖。两者均留待后续数据处理任务。
+
+## 2026-10-28 订单详情关系展开超限及 SDK 数组参数编码错误
+
+- **现象**：订单详情先报 `expand more than the maximum of 3 allowed relations`，改为扁平字段后又报 `Expected type: 'string' for field 'fields', got: 'id,display_id,...'`。
+- **根因**：Mercur 默认订单查询展开了过深的商品关系；请求 SDK 把 `fields` 数组编码成 `fields[0]`、`fields[1]`，而 API 只接受逗号分隔字符串。
+- **处理**：订单详情改为显式扁平字段列表，调用前执行 `fields.join(",")`；商品 handle 缺失时只显示文本，不生成坏链接。
+- **验证**：Storefront `tsc --noEmit` 通过；最终生产镜像下的订单详情浏览器复验未在本轮冻结范围内完成。
 

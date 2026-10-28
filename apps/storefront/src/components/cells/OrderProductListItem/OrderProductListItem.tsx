@@ -41,13 +41,19 @@ export const OrderProductListItem = ({
             )}
           </div>
           <p className="label-md text-secondary">{item.product_title}</p>
-          <LocalizedClientLink
-            href={`/products/${item.variant?.product?.handle}`}
-            target="_blank"
-            className="heading-xs text-primary"
-          >
-            {item.variant?.product?.title}
-          </LocalizedClientLink>
+          {item.variant?.product?.handle ? (
+            <LocalizedClientLink
+              href={`/products/${item.variant.product.handle}`}
+              target="_blank"
+              className="heading-xs text-primary"
+            >
+              {item.variant?.product?.title || item.product_title}
+            </LocalizedClientLink>
+          ) : (
+            <p className="heading-xs text-primary">
+              {item.product_title || item.title}
+            </p>
+          )}
         </div>
         <div className="flex items-center sm:col-span-2">
           <p className="label-md text-secondary">

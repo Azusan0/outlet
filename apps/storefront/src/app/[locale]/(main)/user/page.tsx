@@ -1,12 +1,15 @@
 import { UserNavigation } from "@/components/molecules"
 import { retrieveCustomer } from "@/lib/data/customer"
+import { getTenant } from "@/lib/tenant"
 import { redirect } from "next/navigation"
 
 export default async function UserPage() {
   const user = await retrieveCustomer()
 
   if (!user) {
-    redirect("/login")
+    const tenant = await getTenant()
+    const returnPath = `/${tenant.slug}/user`
+    redirect(`/${tenant.slug}/login?redirect=${encodeURIComponent(returnPath)}`)
   }
   
   return (

@@ -20,6 +20,45 @@ export const retrieveOrderGroup = async (id: string) => {
   return (
     sdk.store.orderGroups.$id.query({
       $id: id,
+      // Mercur's default order-group projection includes
+      // orders.items.variant.product, which exceeds Medusa's relation depth
+      // limit. Keep the projection flat enough for the store API to accept it.
+      fields: [
+        'id',
+        'display_id',
+        'customer_id',
+        'seller_count',
+        'total',
+        'created_at',
+        'updated_at',
+        'orders.id',
+        'orders.display_id',
+        'orders.status',
+        'orders.fulfillment_status',
+        'orders.payment_status',
+        'orders.currency_code',
+        'orders.total',
+        'orders.subtotal',
+        'orders.item_total',
+        'orders.shipping_total',
+        'orders.tax_total',
+        'orders.seller_id',
+        'orders.shipping_address',
+        'orders.seller.id',
+        'orders.seller.name',
+        'orders.seller.handle',
+        'orders.seller.logo',
+        'orders.items.id',
+        'orders.items.title',
+        'orders.items.subtitle',
+        'orders.items.thumbnail',
+        'orders.items.product_title',
+        'orders.items.variant_title',
+        'orders.items.quantity',
+        'orders.items.unit_price',
+        'orders.items.total',
+        'orders.items.variant_id',
+      ].join(','),
       fetchOptions: {
         headers: { ...(await getAuthHeaders()) },
         cache: 'no-cache'

@@ -113,7 +113,11 @@ export async function POST(req: OperationsRequest, res: MedusaResponse) {
     sheet_name: parsed.sheet_name,
     headers: parsed.headers,
     mapping: parsed.mapping,
-    rows: parsed.rows,
+    rows: parsed.rows.map((row) => ({
+      ...row,
+      row_id: row.id,
+      status: row.errors.length ? "invalid" : "valid",
+    })),
     errors: parsed.errors,
     summary: parsed.summary,
   });

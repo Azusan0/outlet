@@ -24,7 +24,7 @@ export const ParentCategoryLinks = ({
 
   return (
     <nav
-      className="hidden lg:flex items-center gap-4"
+      className="hidden xl:flex items-center gap-4"
       aria-label="Parent categories"
     >
       {parentCategories.map(({ id, handle, name }) => {

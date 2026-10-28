@@ -1,6 +1,7 @@
 import type { MedusaContainer } from "@medusajs/framework/types"
 import {
   updateInventoryLevelsWorkflow,
+  updateProductVariantsWorkflow,
   updateProductsWorkflow,
 } from "@medusajs/core-flows"
 import {
@@ -30,6 +31,7 @@ type Variant = {
   id: string
   sku?: string | null
   title?: string | null
+  barcode?: string | null
   prices?: Price[]
   product?: { id?: string; title?: string | null }
 }
@@ -47,13 +49,17 @@ type Offer = {
   sku?: string | null
   prices?: Array<Price | null>
   product_variant?: Variant | null
-  inventory_item_link?: {
+  inventory_items?: Array<{
     inventory_item_id?: string
     inventory_item?: {
       id?: string
       location_levels?: InventoryLevel[]
     } | null
-  }
+    inventory?: {
+      id?: string
+      location_levels?: InventoryLevel[]
+    } | null
+  }>
 }
 
 type ResolvedOffer = {
@@ -111,13 +117,14 @@ async function queryOffersForSkus(
       "product_variant.id",
       "product_variant.sku",
       "product_variant.title",
+      "product_variant.barcode",
       "product_variant.prices.*",
       "product_variant.product.id",
       "product_variant.product.title",
-      "inventory_item_link.inventory_item_id",
-      "inventory_item_link.inventory_item.id",
-      "inventory_item_link.inventory_item.location_levels.id",
-      "inventory_item_link.inventory_item.location_levels.location_id",
+      "inventory_items.inventory_item_id",
+      "inventory_items.inventory.id",
+      "inventory_items.inventory.location_levels.id",
+      "inventory_items.inventory.location_levels.location_id",
     ],
     filters: { sku: skus },
   })
@@ -210,20 +217,13 @@ async function updateResolvedRow(
     stock_updated: false,
   }
 
-  if (row.title || row.barcode) {
+  if (row.title) {
     try {
       await updateProductsWorkflow(container).run({
         input: {
           selector: { id: variant.product!.id! },
           update: {
-            ...(row.title ? { title: row.title } : {}),
-            variants: [
-              {
-                id: variant.id,
-                ...(row.title ? { title: row.title } : {}),
-                ...(row.barcode ? { barcode: row.barcode } : {}),
-              },
-            ],
+            title: row.title,
           },
         },
       })
@@ -231,6 +231,26 @@ async function updateResolvedRow(
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
         `Product details update failed: ${(error as Error).message}`
+      )
+    }
+  }
+
+  if (row.barcode && row.barcode !== variant.barcode) {
+    try {
+      await updateProductVariantsWorkflow(container).run({
+        input: {
+          product_variants: [
+            {
+              id: variant.id,
+              barcode: row.barcode,
+            },
+          ],
+        },
+      })
+    } catch (error) {
+      throw new MedusaError(
+        MedusaError.Types.UNEXPECTED_STATE,
+        `Variant barcode update failed: ${(error as Error).message}`
       )
     }
   }
@@ -257,9 +277,21 @@ async function updateResolvedRow(
   }
 
   if (row.stock !== null) {
-    const item = offer.inventory_item_link?.inventory_item
-    const levels = item?.location_levels ?? []
-    if (!item?.id || levels.length === 0) {
+    const inventoryItems = (offer.inventory_items ?? [])
+      .map((link) => link.inventory ?? link.inventory_item)
+      .filter(
+        (
+          item
+        ): item is NonNullable<NonNullable<Offer["inventory_items"]>[number]["inventory"]> =>
+          Boolean(item?.id)
+      )
+    const levels = inventoryItems.flatMap((item) =>
+      (item.location_levels ?? []).map((level) => ({
+        ...level,
+        inventory_item_id: item.id!,
+      }))
+    )
+    if (levels.length === 0) {
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
         `Offer ${offer.id} has no inventory level to update`
@@ -270,7 +302,7 @@ async function updateResolvedRow(
         input: {
           updates: levels.map((level) => ({
             id: level.id,
-            inventory_item_id: item.id!,
+            inventory_item_id: level.inventory_item_id,
             location_id: level.location_id,
             stocked_quantity: row.stock!,
           })),
