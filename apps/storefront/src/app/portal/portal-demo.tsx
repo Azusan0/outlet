@@ -163,9 +163,12 @@ const MODULES: ModuleDefinition[] = [
     icon: "analytics",
     allowedRoles: ALL_ROLES,
     submodules: [
-      { id: "sales", label: "销售分析", description: "按时间、商品和商家查看销售趋势。" },
-      { id: "product", label: "商品分析", description: "查看商品转化、库存周转和退款情况。" },
-      { id: "inventory", label: "库存分析", description: "识别低库存、滞销和缺货风险。" },
+      { id: "overview", label: "经营总览", description: "按自定义日期区间查看销售、流量、营销、客户和库存全景。" },
+      { id: "sales", label: "销售分析", description: "分析销售趋势、渠道贡献、订单结构和商家表现。" },
+      { id: "product", label: "商品分析", description: "查看商品转化、动销、毛利、退款和库存周转。" },
+      { id: "marketing", label: "营销归因", description: "分析营销投入、渠道 ROAS、增量收入和活动贡献。" },
+      { id: "customers", label: "客户分析", description: "查看新老客、复购、RFM 分层、LTV 和留存。" },
+      { id: "inventory", label: "库存分析", description: "识别低库存、滞销、缺货风险和补货优先级。" },
     ],
   },
   {
@@ -1261,32 +1264,430 @@ function ServicePage({
   )
 }
 
-function AnalyticsPage({ role, submodule }: { role: Role; submodule: string }) {
+type AnalyticsPreset = "today" | "7d" | "month" | "lastMonth" | "custom"
+
+const ANALYTICS_PRESETS: Array<{ id: AnalyticsPreset; label: string }> = [
+  { id: "today", label: "今日" },
+  { id: "7d", label: "近 7 天" },
+  { id: "month", label: "本月" },
+  { id: "lastMonth", label: "上月" },
+  { id: "custom", label: "自定义" },
+]
+
+const padDatePart = (value: number) => String(value).padStart(2, "0")
+
+const toDateInput = (date: Date) =>
+  `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`
+
+const parseDateInput = (value: string) => {
+  const [year, month, day] = value.split("-").map(Number)
+  return new Date(year, month - 1, day)
+}
+
+const getAnalyticsRange = (preset: Exclude<AnalyticsPreset, "custom">) => {
+  const today = new Date()
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+  const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+  const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0)
+
+  if (preset === "today") return { start: toDateInput(today), end: toDateInput(today) }
+  if (preset === "7d") {
+    const start = new Date(today)
+    start.setDate(today.getDate() - 6)
+    return { start: toDateInput(start), end: toDateInput(today) }
+  }
+  if (preset === "lastMonth") {
+    return { start: toDateInput(lastMonthStart), end: toDateInput(lastMonthEnd) }
+  }
+  return { start: toDateInput(monthStart), end: toDateInput(today) }
+}
+
+const getInclusiveDays = (start: string, end: string) => {
+  if (!start || !end) return 1
+  const milliseconds = parseDateInput(end).getTime() - parseDateInput(start).getTime()
+  return Math.max(1, Math.round(milliseconds / 86400000) + 1)
+}
+
+const formatDateLabel = (value: string) => value ? value.replaceAll("-", ".") : "未选择"
+
+const formatMoney = (value: number, compact = true) => {
+  if (compact && value >= 1000) return `€${(value / 1000).toFixed(1)}k`
+  return `€${Math.round(value).toLocaleString("en-US")}`
+}
+
+const formatCount = (value: number) => Math.round(value).toLocaleString("en-US")
+
+const buildTrendLabels = (start: string, end: string) => {
+  const days = getInclusiveDays(start, end)
+  if (days <= 1) return ["今日"]
+  const count = Math.min(8, days)
+  const startDate = parseDateInput(start)
+  const endDate = parseDateInput(end)
+  const span = endDate.getTime() - startDate.getTime()
+
+  return Array.from({ length: count }, (_, index) => {
+    const ratio = count === 1 ? 0 : index / (count - 1)
+    const date = new Date(startDate.getTime() + span * ratio)
+    return `${date.getMonth() + 1}/${date.getDate()}`
+  })
+}
+
+const BI_BASE = {
+  platform: {
+    gmv: 50800,
+    orders: 539,
+    sessions: 14184,
+    conversion: 3.8,
+    refund: 1.1,
+    grossMargin: 62.8,
+    marketingSpend: 4820,
+    attributedGmv: 18720,
+    incrementalGmv: 9460,
+    couponCost: 1120,
+    discountCost: 2340,
+    newCustomers: 266,
+  },
+  merchant: {
+    gmv: 28400,
+    orders: 301,
+    sessions: 7166,
+    conversion: 4.2,
+    refund: 1.2,
+    grossMargin: 64.5,
+    marketingSpend: 2760,
+    attributedGmv: 10800,
+    incrementalGmv: 5920,
+    couponCost: 680,
+    discountCost: 1380,
+    newCustomers: 140,
+  },
+}
+
+const BI_TREND = [
+  { total: 62, natural: 48, incremental: 14 },
+  { total: 69, natural: 53, incremental: 16 },
+  { total: 66, natural: 50, incremental: 16 },
+  { total: 78, natural: 58, incremental: 20 },
+  { total: 74, natural: 54, incremental: 20 },
+  { total: 88, natural: 64, incremental: 24 },
+  { total: 82, natural: 59, incremental: 23 },
+  { total: 96, natural: 68, incremental: 28 },
+]
+
+const CHANNEL_PERFORMANCE = [
+  { name: "自然搜索", share: 32, conversion: 4.5, growth: 8.2 },
+  { name: "付费社交", share: 24, conversion: 3.6, growth: 18.6 },
+  { name: "直接访问", share: 18, conversion: 4.8, growth: 5.4 },
+  { name: "邮件营销", share: 14, conversion: 5.2, growth: 11.3 },
+  { name: "联盟与内容", share: 12, conversion: 2.9, growth: -2.1 },
+]
+
+const PRODUCT_PERFORMANCE = [
+  { name: "Linen Overshirt / Sand", sku: "NS-041", merchant: "North Studio", gmv: 6800, orders: 53, views: 1620, addToCart: 264, refund: 1.2, stock: 4, safety: 8, turnover: 8.6 },
+  { name: "Field Jacket / Stone", sku: "NS-009", merchant: "North Studio", gmv: 5200, orders: 21, views: 780, addToCart: 102, refund: 0.5, stock: 11, safety: 6, turnover: 5.1 },
+  { name: "Trail Tote / Olive", sku: "NS-018", merchant: "North Studio", gmv: 3900, orders: 51, views: 1310, addToCart: 230, refund: 0.8, stock: 7, safety: 10, turnover: 7.8 },
+  { name: "Utility Cap / Black", sku: "NS-032", merchant: "North Studio", gmv: 2600, orders: 62, views: 1100, addToCart: 170, refund: 1.6, stock: 18, safety: 8, turnover: 6.2 },
+  { name: "Leather Card Case / Ink", sku: "AG-014", merchant: "Aster Studio", gmv: 3400, orders: 59, views: 960, addToCart: 140, refund: 0.9, stock: 26, safety: 12, turnover: 4.7 },
+  { name: "Canvas Field Pouch / Moss", sku: "FS-022", merchant: "Field Supply", gmv: 2900, orders: 45, views: 860, addToCart: 119, refund: 2.4, stock: 3, safety: 8, turnover: 9.1 },
+]
+
+const MERCHANT_PERFORMANCE = [
+  { name: "Northline", merchant: "North Studio", gmv: 28400, conversion: 4.2, refund: 1.2, growth: 12.4, share: 55.9 },
+  { name: "Field Notes", merchant: "Field Supply", gmv: 12800, conversion: 3.7, refund: 1.8, growth: 6.8, share: 25.2 },
+  { name: "Aster Goods", merchant: "Aster Studio", gmv: 9600, conversion: 3.1, refund: 0.9, growth: -2.1, share: 18.9 },
+]
+
+const BI_DATA_COVERAGE = [
+  { name: "订单与退款明细", coverage: 99.8, freshness: "2 分钟" },
+  { name: "商品浏览 / 加购事件", coverage: 96.4, freshness: "4 分钟" },
+  { name: "会话与搜索词", coverage: 94.1, freshness: "6 分钟" },
+  { name: "广告花费与渠道", coverage: 91.7, freshness: "18 分钟" },
+  { name: "活动与优惠配置", coverage: 98.2, freshness: "7 分钟" },
+  { name: "库存快照", coverage: 99.5, freshness: "1 分钟" },
+  { name: "客户标签与分群", coverage: 87.6, freshness: "32 分钟" },
+]
+
+function AnalyticsPage({
+  role,
+  submodule,
+  notify,
+}: {
+  role: Role
+  submodule: string
+  notify: (message: string) => void
+}) {
   const isPlatform = role === "platform"
-  const labels = submodule === "inventory"
-    ? ["低库存", "安全库存", "滞销", "缺货"]
-    : submodule === "product"
-      ? ["商品浏览", "加购", "下单", "退款"]
-      : ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-  const values = submodule === "inventory"
-    ? [34, 48, 21, 12]
-    : submodule === "product"
-      ? [78, 42, 28, 8]
-      : isPlatform
-        ? [42, 56, 48, 72, 64, 86, 78]
-        : [28, 36, 32, 48, 44, 58, 52]
-  const merchantProducts = PRODUCTS.filter((product) => product.merchant === "North Studio")
-  const insightRows = isPlatform
+  const [preset, setPreset] = useState<AnalyticsPreset>("month")
+  const [dateRange, setDateRange] = useState(() => getAnalyticsRange("month"))
+  const dayCount = getInclusiveDays(dateRange.start, dateRange.end)
+  const scale = Math.min(3.6, Math.max(0.18, dayCount / 28))
+  const base = BI_BASE[isPlatform ? "platform" : "merchant"]
+  const gmv = base.gmv * scale
+  const orders = Math.round(base.orders * scale)
+  const sessions = Math.round(base.sessions * scale)
+  const aov = gmv / Math.max(1, orders)
+  const marketingSpend = base.marketingSpend * scale
+  const attributedGmv = base.attributedGmv * scale
+  const incrementalGmv = base.incrementalGmv * scale
+  const naturalGmv = Math.max(0, gmv - incrementalGmv)
+  const roas = attributedGmv / Math.max(1, marketingSpend)
+  const incrementalRoas = incrementalGmv / Math.max(1, marketingSpend)
+  const marketingProfit = attributedGmv * (base.grossMargin / 100) - marketingSpend - base.couponCost * scale - base.discountCost * scale * 0.35
+  const newCustomers = Math.round(base.newCustomers * scale)
+  const cac = marketingSpend / Math.max(1, newCustomers)
+  const trendLabels = buildTrendLabels(dateRange.start, dateRange.end)
+  const trend = trendLabels.map((label, index) => {
+    const sourceIndex = trendLabels.length === 1 ? BI_TREND.length - 1 : Math.round(index * (BI_TREND.length - 1) / (trendLabels.length - 1))
+    return { label, ...BI_TREND[sourceIndex] }
+  })
+  const productRows = PRODUCT_PERFORMANCE
+    .filter((product) => isPlatform || product.merchant === "North Studio")
+    .map((product) => ({
+      ...product,
+      gmv: product.gmv * scale,
+      orders: Math.round(product.orders * scale),
+      views: Math.round(product.views * scale),
+      addToCart: Math.round(product.addToCart * scale),
+    }))
+  const merchantRows = MERCHANT_PERFORMANCE
+    .filter((merchant) => isPlatform || merchant.merchant === "North Studio")
+    .map((merchant) => ({ ...merchant, gmv: merchant.gmv * scale }))
+  const channelRows = CHANNEL_PERFORMANCE.map((channel) => ({
+    ...channel,
+    sessions: Math.round(sessions * channel.share / 100),
+    gmv: gmv * channel.share / 100,
+  }))
+  const funnelSteps = [
+    { label: "访问店铺", value: sessions, width: 100 },
+    { label: "浏览商品", value: Math.round(sessions * 0.62), width: 78 },
+    { label: "加入购物车", value: Math.round(sessions * 0.14), width: 54 },
+    { label: "进入结账", value: Math.round(sessions * 0.072), width: 36 },
+    { label: "完成支付", value: orders, width: 22 },
+  ]
+  const aiActions = isPlatform
     ? [
-        ["Northline", "€28.4k", "+12.4%", "转化率最高"],
-        ["Field Notes", "€12.8k", "+6.8%", "客单价上升"],
-        ["Aster Goods", "€9.6k", "-2.1%", "待补资料影响上架"],
+        { title: "提高 Northline 轻户外系列曝光", basis: "商品转化率高于平台均值 1.6pp，库存周转健康", impact: "预计 +€3.2k / 7 天", confidence: "84%", risk: "低", state: "待审批", tone: "amber" as const },
+        { title: "暂停 Aster Goods 低增量活动", basis: "增量 ROAS 0.72，连续 5 天低于盈亏平衡线", impact: "预计节省 €680", confidence: "91%", risk: "中", state: "建议执行", tone: "blue" as const },
+        { title: "优先补货 Field Supply 缺货 SKU", basis: "FS-022 可售库存仅 3 件，近 7 天售罄概率 86%", impact: "预计挽回 €1.4k", confidence: "88%", risk: "低", state: "待审批", tone: "amber" as const },
       ]
     : [
-        ["Linen Overshirt / Sand", "€6.8k", "42 件", "低库存"],
-        ["Field Jacket / Stone", "€5.2k", "21 件", "库存健康"],
-        ["Trail Tote / Olive", "€3.9k", "17 件", "加购率上升"],
+        { title: "提高 Linen Overshirt 首页曝光", basis: "支付转化率 5.9%，高于本店均值 1.7pp", impact: "预计 +€1.8k / 7 天", confidence: "86%", risk: "库存不足", state: "待审批", tone: "amber" as const },
+        { title: "对高价值待唤醒客户发券", basis: "187 位客户超过 90 天未购买，历史客单价 €142", impact: "预计 +€920", confidence: "78%", risk: "中", state: "生成人群", tone: "blue" as const },
+        { title: "暂停联盟渠道低效投放", basis: "联盟渠道增量 ROAS 0.81，退款率高于均值 0.9pp", impact: "预计节省 €420", confidence: "83%", risk: "低", state: "建议执行", tone: "blue" as const },
       ]
+
+  const updatePreset = (nextPreset: AnalyticsPreset) => {
+    setPreset(nextPreset)
+    if (nextPreset !== "custom") setDateRange(getAnalyticsRange(nextPreset))
+  }
+
+  const updateStartDate = (value: string) => {
+    if (!value) return
+    setPreset("custom")
+    setDateRange((current) => ({ start: value, end: value > current.end ? value : current.end }))
+  }
+
+  const updateEndDate = (value: string) => {
+    if (!value) return
+    setPreset("custom")
+    setDateRange((current) => ({ start: value < current.start ? value : current.start, end: value }))
+  }
+
+  const trendCard = (title: string, eyebrow: string) => (
+    <section className={styles.card}>
+      <SectionHead
+        eyebrow={eyebrow}
+        title={title}
+        action={<div className={styles.biLegend}><span><i className={styles.legendNatural} />自然销售</span><span><i className={styles.legendIncremental} />营销增量</span></div>}
+      />
+      <div className={styles.biTrendSummary}>
+        <strong>{formatMoney(gmv)}</strong>
+        <span><b>+12.4%</b> 较上一周期</span>
+        <small>{formatCount(orders)} 笔订单 · {formatCount(sessions)} 次访问</small>
+      </div>
+      <div className={styles.biTrendChart}>
+        {trend.map((point) => (
+          <div className={styles.biTrendColumn} key={point.label}>
+            <span>{formatMoney(gmv * point.total / 100, true)}</span>
+            <div className={styles.biStackBar} style={{ height: `${point.total}%` }}>
+              <i className={styles.biIncrementalBar} style={{ height: `${point.incremental / point.total * 100}%` }} />
+              <i className={styles.biNaturalBar} style={{ height: `${point.natural / point.total * 100}%` }} />
+            </div>
+            <small>{point.label}</small>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+
+  const funnelCard = () => (
+    <section className={styles.card}>
+      <SectionHead eyebrow="CONVERSION FUNNEL" title="流量与转化漏斗" action={<Badge tone="blue">整体转化 {base.conversion.toFixed(1)}%</Badge>} />
+      <div className={styles.funnelChart}>
+        {funnelSteps.map((step, index) => (
+          <div className={styles.funnelRow} key={step.label}>
+            <span>{step.label}</span>
+            <div><i style={{ width: `${step.width}%` }} /></div>
+            <strong>{formatCount(step.value)}</strong>
+            <small>{index === 0 ? "100%" : `${(step.value / Math.max(1, funnelSteps[index - 1].value) * 100).toFixed(1)}%`}</small>
+          </div>
+        ))}
+      </div>
+      <div className={styles.funnelFoot}><span>加购率 14.0%</span><span>结账转化 58.3%</span><span>访客支付转化 {base.conversion.toFixed(1)}%</span></div>
+    </section>
+  )
+
+  const marketingAttributionCard = () => (
+    <section className={styles.card}>
+      <SectionHead
+        eyebrow="INCREMENTAL ATTRIBUTION"
+        title="营销归因与增量效果"
+        action={<Badge tone="green">实验校准 · 置信度 92%</Badge>}
+      />
+      <div className={styles.attributionGrid}>
+        <div className={styles.incrementChartWrap}>
+          <div className={styles.biLegend}><span><i className={styles.legendNatural} />自然基线</span><span><i className={styles.legendIncremental} />营销增量</span></div>
+          <div className={styles.incrementChart}>
+            {trend.map((point) => (
+              <div key={`increment-${point.label}`}>
+                <div className={styles.incrementStack} style={{ height: `${point.total}%` }}>
+                  <i className={styles.biIncrementalBar} style={{ height: `${point.incremental / point.total * 100}%` }} />
+                  <i className={styles.biNaturalBar} style={{ height: `${point.natural / point.total * 100}%` }} />
+                </div>
+                <small>{point.label}</small>
+              </div>
+            ))}
+          </div>
+        </div>
+        <dl className={styles.attributionMetrics}>
+          <div><dt>营销花费</dt><dd>{formatMoney(marketingSpend)}</dd><small>含媒体与优惠成本</small></div>
+          <div><dt>归因成交</dt><dd>{formatMoney(attributedGmv)}</dd><small>最后点击模型</small></div>
+          <div><dt>增量成交</dt><dd>{formatMoney(incrementalGmv)}</dd><small>剔除自然基线</small></div>
+          <div><dt>自然基线</dt><dd>{formatMoney(naturalGmv)}</dd><small>无营销反事实预估</small></div>
+          <div><dt>ROAS</dt><dd>{roas.toFixed(2)}x</dd><small>归因口径</small></div>
+          <div><dt>增量 ROAS</dt><dd className={incrementalRoas >= 1 ? styles.positiveText : styles.warningText}>{incrementalRoas.toFixed(2)}x</dd><small>经营决策口径</small></div>
+          <div><dt>新客 CAC</dt><dd>€{cac.toFixed(1)}</dd><small>{formatCount(newCustomers)} 位新客</small></div>
+          <div><dt>营销贡献毛利</dt><dd className={marketingProfit >= 0 ? styles.positiveText : styles.warningText}>{formatMoney(marketingProfit)}</dd><small>扣除媒体与优惠成本</small></div>
+        </dl>
+      </div>
+      <div className={styles.attributionMethods}>
+        <div><span>最后点击</span><strong>{formatMoney(attributedGmv)}</strong><small>适合渠道对账，不代表增量</small></div>
+        <div><span>线性归因</span><strong>{formatMoney(attributedGmv * 0.92)}</strong><small>分散计算多触点贡献</small></div>
+        <div><span>增量实验</span><strong>{formatMoney(incrementalGmv)}</strong><small>用于预算与自动运营决策</small></div>
+      </div>
+      <div className={styles.attributionNote}><Icon name="analytics" size={15} /><span>营销贡献毛利已扣除媒体花费、优惠券和折扣成本；增量结果用于后续 Agent 自动预算分配，不以单次点击 ROAS 直接决策。</span></div>
+    </section>
+  )
+
+  const channelCard = () => (
+    <section className={styles.card}>
+      <SectionHead eyebrow="CHANNEL MIX" title={isPlatform ? "全平台渠道贡献" : "本店渠道贡献"} action={<button className={styles.textButton} onClick={() => notify("渠道分析报表导出任务已创建（Demo）")}>导出 <Icon name="download" size={14} /></button>} />
+      <div className={styles.channelBars}>
+        {channelRows.map((channel) => (
+          <div key={channel.name}>
+            <div><strong>{channel.name}</strong><small>{formatCount(channel.sessions)} 访问 · CVR {channel.conversion.toFixed(1)}%</small></div>
+            <div className={styles.channelBar}><i style={{ width: `${channel.share / 32 * 100}%` }} /></div>
+            <b>{formatMoney(channel.gmv)}</b>
+            <em className={channel.growth >= 0 ? styles.positiveText : styles.warningText}>{channel.growth >= 0 ? "+" : ""}{channel.growth.toFixed(1)}%</em>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+
+  const productTableCard = () => (
+    <section className={styles.card}>
+      <SectionHead eyebrow="PRODUCT PERFORMANCE" title={isPlatform ? "跨商家商品表现" : "本店商品表现"} action={<Badge tone="gray">{productRows.length} 个重点 SKU</Badge>} />
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead><tr>{isPlatform ? <th>商品 / 商家</th> : <th>商品</th>}<th>成交金额</th><th>订单</th><th>转化率</th><th>加购率</th><th>退款率</th><th>库存</th><th>经营判断</th></tr></thead>
+          <tbody>
+            {productRows.map((product) => {
+              const conversion = product.orders / Math.max(1, product.views) * 100
+              const stockRisk = product.stock < product.safety
+              return (
+                <tr key={product.sku}>
+                  <td><span className={styles.tableIdentity}><strong>{product.name}</strong><small>{product.sku}{isPlatform ? ` · ${product.merchant}` : ""}</small></span></td>
+                  <td>{formatMoney(product.gmv)}</td>
+                  <td>{formatCount(product.orders)}</td>
+                  <td>{conversion.toFixed(1)}%</td>
+                  <td>{(product.addToCart / Math.max(1, product.views) * 100).toFixed(1)}%</td>
+                  <td><span className={product.refund > 1.5 ? styles.warningText : ""}>{product.refund.toFixed(1)}%</span></td>
+                  <td>{product.stock} / {product.safety}</td>
+                  <td><Badge tone={stockRisk ? "amber" : conversion >= 4 ? "green" : "gray"}>{stockRisk ? "补货优先" : conversion >= 4 ? "增长商品" : "稳定销售"}</Badge></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+
+  const aiCard = () => (
+    <section className={styles.card}>
+      <SectionHead eyebrow="AI OPERATIONS COPILOT" title="AI 运营建议" action={<button className={styles.secondaryButton} onClick={() => notify("AI 已重新分析当前日期区间（Demo）")}><Icon name="analytics" size={14} />重新分析</button>} />
+      <div className={styles.aiActionList}>
+        {aiActions.map((action, index) => (
+          <article className={styles.aiActionCard} key={action.title}>
+            <div><span>{String(index + 1).padStart(2, "0")}</span><Badge tone={action.tone}>{action.state}</Badge></div>
+            <strong>{action.title}</strong>
+            <p>{action.basis}</p>
+            <dl><div><dt>预计影响</dt><dd>{action.impact}</dd></div><div><dt>置信度</dt><dd>{action.confidence}</dd></div><div><dt>风险</dt><dd>{action.risk}</dd></div></dl>
+            <button className={styles.textButton} onClick={() => notify(`已创建运营任务：${action.title}（Demo）`)}>创建运营任务 <Icon name="arrow" size={14} /></button>
+          </article>
+        ))}
+      </div>
+      <div className={styles.dataIsolationNote}><Icon name="platform" size={15} /><span>AI 仅生成建议和待审批任务，预算、补货、上下架等动作必须经过权限校验和人工确认。</span></div>
+    </section>
+  )
+
+  const aiCompactCard = () => (
+    <section className={styles.card}>
+      <SectionHead eyebrow="AI OPERATIONS COPILOT" title="优先运营动作" action={<Badge tone="blue">3 条建议</Badge>} />
+      <div className={styles.aiCompactList}>
+        {aiActions.map((action, index) => (
+          <button key={action.title} onClick={() => notify(`已创建运营任务：${action.title}（Demo）`)}>
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            <div><strong>{action.title}</strong><small>{action.basis}</small></div>
+            <em>{action.impact}</em>
+            <Badge tone={action.tone}>{action.confidence}</Badge>
+          </button>
+        ))}
+      </div>
+      <div className={styles.aiCompactFoot}>
+        <span>AI 只生成建议，执行前需人工审批</span>
+        <button className={styles.textButton} onClick={() => notify("已打开全部 AI 运营建议（Demo）")}>查看全部 <Icon name="arrow" size={14} /></button>
+      </div>
+    </section>
+  )
+
+  const dataReadinessCard = () => (
+    <section className={styles.card}>
+      <SectionHead eyebrow="AI DATA READINESS" title="数据完整度与新鲜度" action={<Badge tone="blue">7 / 7 数据域接入</Badge>} />
+      <div className={styles.coverageList}>
+        {BI_DATA_COVERAGE.map((domain) => (
+          <div className={styles.coverageRow} key={domain.name}>
+            <div><strong>{domain.name}</strong><small>更新于 {domain.freshness}前</small></div>
+            <div className={styles.coverageBar}><i style={{ width: `${domain.coverage}%` }} /></div>
+            <span>{domain.coverage.toFixed(1)}%</span>
+          </div>
+        ))}
+      </div>
+      <div className={styles.readinessSummary}>
+        <div><span>缺失率</span><strong>1.8%</strong><small>低于阈值 3%</small></div>
+        <div><span>异常订单</span><strong>12</strong><small>已进入清洗队列</small></div>
+        <div><span>可训练样本</span><strong>28.6k</strong><small>近 180 天事件</small></div>
+      </div>
+    </section>
+  )
+
+  const campaignRows = [
+    { name: "秋季满减", merchant: "Northline", spend: 1240, attributed: 6840, incremental: 3180, roas: 2.56, coupon: 420, status: "进行中" },
+    { name: "新客首单立减", merchant: "Northline", spend: 860, attributed: 4120, incremental: 2210, roas: 2.57, coupon: 310, status: "进行中" },
+    { name: "会员双倍积分", merchant: "Aster Studio", spend: 640, attributed: 1860, incremental: 410, roas: 0.64, coupon: 180, status: "观察中" },
+    { name: "户外专题内容", merchant: "Field Supply", spend: 920, attributed: 2980, incremental: 1260, roas: 1.37, coupon: 90, status: "进行中" },
+  ].filter((row) => isPlatform || row.merchant === "Northline")
 
   return (
     <div className={styles.pageStack}>
@@ -1294,46 +1695,244 @@ function AnalyticsPage({ role, submodule }: { role: Role; submodule: string }) {
         <span className={styles.scopeIcon}><Icon name="analytics" size={17} /></span>
         <div>
           <strong>{isPlatform ? "全平台经营分析" : "North Studio 本店经营分析"}</strong>
-          <small>{isPlatform ? "聚合全部商家数据，用于平台经营监控、商家排名与风险识别。" : "仅聚合当前商家租户下的订单、商品和流量数据。"}</small>
+          <small>{isPlatform ? "聚合全部商家数据，用于平台经营监控、商家排名与风险识别。" : "仅聚合当前商家租户下的订单、商品、流量与营销数据。"}</small>
         </div>
-        <div className={styles.scopeActions}><Badge tone={isPlatform ? "blue" : "gray"}>{isPlatform ? "全平台数据" : "本店数据"}</Badge><button className={styles.secondaryButton}>近 30 天 <Icon name="chevron" size={14} /></button></div>
+        <div className={styles.scopeActions}><Badge tone={isPlatform ? "blue" : "gray"}>{isPlatform ? "全平台数据" : "本店数据"}</Badge><Badge tone="green">实时更新</Badge></div>
       </div>
-      <div className={styles.statGrid}>
-        <StatCard label={isPlatform ? "平台成交金额" : "本店成交金额"} value={isPlatform ? "€50.8k" : "€28.4k"} note="+12.4% vs 上月" icon="analytics" />
-        <StatCard label="订单转化率" value={isPlatform ? "3.8%" : "4.2%"} note="+0.6% vs 上月" icon="orders" />
-        <StatCard label={isPlatform ? "活跃商家" : "客单价"} value={isPlatform ? "3" : "€94.20"} note={isPlatform ? "1 家待补资料" : "+€4.10 vs 上月"} icon={isPlatform ? "store" : "customers"} />
-        <StatCard label="退款率" value={isPlatform ? "1.1%" : "1.2%"} note="-0.3% vs 上月" icon="products" />
-      </div>
-      <div className={styles.analyticsLayout}>
-        <section className={styles.card}>
-          <SectionHead eyebrow="PERFORMANCE TREND" title={submodule === "inventory" ? "库存风险分布" : submodule === "product" ? "商品转化漏斗" : isPlatform ? "全平台销售趋势" : "本店销售趋势"} action={<span className={styles.mutedText}>单位：订单数 / 指数</span>} />
-          <div className={styles.chart}>{values.map((value, index) => <div className={styles.chartColumn} key={labels[index]}><div className={styles.chartBar} style={{ height: `${value}%` }}><span>{value}</span></div><small>{labels[index]}</small></div>)}</div>
-        </section>
-        <aside className={styles.card}>
-          <SectionHead eyebrow="BI INSIGHTS" title="经营洞察" action={<Badge tone="green">自动分析</Badge>} />
-          <div className={styles.insightList}>
-            {(isPlatform ? [
-              ["商家集中度", "Northline 贡献平台 55.9% 成交额，需关注头部商家依赖。"],
-              ["待补资料影响", "Aster Goods 商品上架率低于平台均值 18%。"],
-              ["售后风险", "Field Notes 本周售后率上升 0.8 个百分点。"],
-            ] : [
-              ["增长机会", "轻户外系列本周转化率提升 0.9%，可增加首页曝光。"],
-              ["库存预警", "NS-041 库存仅 4 件，低于安全库存 8 件。"],
-              ["客服关联", "2 个会话来自高价值客户，建议优先接入。"],
-            ]).map(([title, detail]) => <div className={styles.insightItem} key={title}><span><Icon name="analytics" size={15} /></span><div><strong>{title}</strong><p>{detail}</p></div></div>)}
+
+      <section className={styles.biFilterPanel}>
+        <div className={styles.biFilterTop}>
+          <div className={styles.biPresetGroup} role="group" aria-label="日期快捷区间">
+            {ANALYTICS_PRESETS.map((item) => (
+              <button
+                key={item.id}
+                className={preset === item.id ? styles.biPresetActive : ""}
+                onClick={() => updatePreset(item.id)}
+                aria-pressed={preset === item.id}
+              >
+                {item.label}
+              </button>
+            ))}
           </div>
-        </aside>
-      </div>
-      <section className={styles.card}>
-        <SectionHead eyebrow={isPlatform ? "MERCHANT BENCHMARK" : "PRODUCT PERFORMANCE"} title={isPlatform ? "商家经营排名" : "本店商品表现"} action={<button className={styles.textButton}>导出分析 <Icon name="download" size={14} /></button>} />
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <thead><tr><th>{isPlatform ? "商家 / 品牌" : "商品"}</th><th>成交金额</th><th>指标</th><th>经营判断</th></tr></thead>
-            <tbody>{insightRows.map((row) => <tr key={row[0]}><td><strong>{row[0]}</strong></td><td>{row[1]}</td><td>{row[2]}</td><td><Badge tone={row[3].includes("低库存") || row[3].includes("影响") ? "amber" : "green"}>{row[3]}</Badge></td></tr>)}</tbody>
-          </table>
+          <div className={styles.biDateFields}>
+            <label><span>开始日期</span><input type="date" value={dateRange.start} max={dateRange.end} onChange={(event) => updateStartDate(event.target.value)} /></label>
+            <i>至</i>
+            <label><span>结束日期</span><input type="date" value={dateRange.end} min={dateRange.start} onChange={(event) => updateEndDate(event.target.value)} /></label>
+            <button className={styles.primaryButton} onClick={() => notify(`已按 ${formatDateLabel(dateRange.start)} 至 ${formatDateLabel(dateRange.end)} 重新查询（Demo）`)}><Icon name="search" size={14} />查询</button>
+          </div>
         </div>
-        {!isPlatform ? <div className={styles.dataIsolationNote}><Icon name="platform" size={15} /><span>商家 BI 查询必须由后端强制追加 `merchant_id = currentMerchant`，前端隐藏不构成安全边界。</span></div> : null}
+        <div className={styles.biFilterMeta}>
+          <span><Icon name="check" size={13} />数据范围：{formatDateLabel(dateRange.start)} 至 {formatDateLabel(dateRange.end)} · 共 {dayCount} 天</span>
+          <span>对比周期：上一等长周期</span>
+          <span>更新时间：今天 10:42</span>
+        </div>
       </section>
+
+      <div className={styles.biStatGrid}>
+        <StatCard label={isPlatform ? "平台成交金额" : "本店成交金额"} value={formatMoney(gmv)} note="+12.4% 较上一周期" icon="analytics" />
+        <StatCard label="订单数" value={formatCount(orders)} note={`${formatCount(sessions)} 次访问`} icon="orders" />
+        <StatCard label="访客转化率" value={`${base.conversion.toFixed(1)}%`} note="+0.6pp 较上一周期" icon="customers" />
+        <StatCard label="客单价" value={`€${aov.toFixed(2)}`} note="+€4.10 较上一周期" icon="products" />
+        <StatCard label="营销花费" value={formatMoney(marketingSpend)} note="媒体 + 优惠成本" icon="marketing" />
+        <StatCard label="增量成交额" value={formatMoney(incrementalGmv)} note="剔除自然基线" icon="analytics" />
+        <StatCard label="增量 ROAS" value={`${incrementalRoas.toFixed(2)}x`} note="经营决策口径" icon="marketing" />
+        <StatCard label="营销贡献毛利" value={formatMoney(marketingProfit)} note={`毛利率 ${base.grossMargin.toFixed(1)}%`} icon="analytics" />
+      </div>
+
+      {submodule === "overview" ? (
+        <>
+          <div className={styles.analyticsLayout}>
+            {trendCard(isPlatform ? "全平台成交趋势" : "本店成交趋势", "SALES & INCREMENTALITY")}
+            {aiCompactCard()}
+          </div>
+          {marketingAttributionCard()}
+          <div className={styles.analyticsLayout}>
+            {funnelCard()}
+            {channelCard()}
+          </div>
+          {productTableCard()}
+          <div className={styles.analyticsLayout}>
+            {dataReadinessCard()}
+            <section className={styles.card}>
+              <SectionHead eyebrow="BUSINESS HEALTH" title="经营健康度" action={<Badge tone="amber">3 项需关注</Badge>} />
+              <div className={styles.healthList}>
+                <div><span className={styles.healthDotAmber} /><strong>库存风险</strong><small>NS-041 可售库存低于安全库存 4 件</small><Badge tone="amber">需补货</Badge></div>
+                <div><span className={styles.healthDotBlue} /><strong>营销效率</strong><small>付费社交贡献 18.6% 增长，增量 ROAS 2.14x</small><Badge tone="green">健康</Badge></div>
+                <div><span className={styles.healthDotAmber} /><strong>客户资产</strong><small>187 位高价值客户超过 90 天未复购</small><Badge tone="amber">待唤醒</Badge></div>
+                <div><span className={styles.healthDotGreen} /><strong>数据质量</strong><small>订单与退款数据覆盖率 99.8%</small><Badge tone="green">正常</Badge></div>
+              </div>
+            </section>
+          </div>
+        </>
+      ) : null}
+
+      {submodule === "sales" ? (
+        <>
+          {trendCard(isPlatform ? "全平台销售趋势" : "本店销售趋势", "SALES PERFORMANCE")}
+          <div className={styles.analyticsLayout}>
+            {channelCard()}
+            <section className={styles.card}>
+              <SectionHead eyebrow="MERCHANT BENCHMARK" title={isPlatform ? "商家经营排名" : "本店经营结构"} action={<Badge tone="blue">按成交金额</Badge>} />
+              <div className={styles.merchantRankList}>
+                {merchantRows.map((merchant, index) => (
+                  <div key={merchant.name}>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <div><strong>{merchant.name}</strong><small>{merchant.merchant} · 转化率 {merchant.conversion.toFixed(1)}%</small></div>
+                    <b>{formatMoney(merchant.gmv)}</b>
+                    <em className={merchant.growth >= 0 ? styles.positiveText : styles.warningText}>{merchant.growth >= 0 ? "+" : ""}{merchant.growth.toFixed(1)}%</em>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+          <div className={styles.analyticsLayout}>
+            {funnelCard()}
+            {aiCompactCard()}
+          </div>
+        </>
+      ) : null}
+
+      {submodule === "product" ? (
+        <>
+          {productTableCard()}
+          <div className={styles.analyticsLayout}>
+            {funnelCard()}
+            <section className={styles.card}>
+              <SectionHead eyebrow="CATEGORY MIX" title="品类与价格带" action={<span className={styles.mutedText}>按成交金额</span>} />
+              <div className={styles.categoryBars}>
+                {[["外套与衬衫", 38, "€10.8k"], ["包袋与配件", 27, "€7.7k"], ["鞋履", 19, "€5.4k"], ["生活方式", 16, "€4.6k"]].map(([name, value, amount]) => (
+                  <div key={name}><span>{name}</span><div><i style={{ width: `${value}%` }} /></div><strong>{amount}</strong><small>{value}%</small></div>
+                ))}
+              </div>
+              <div className={styles.categoryNote}><strong>价格带洞察</strong><p>€80–€140 区间贡献 46% 订单，€200 以上商品毛利率高出均值 4.8pp，但转化率低 1.2pp。</p></div>
+            </section>
+          </div>
+          {aiCard()}
+        </>
+      ) : null}
+
+      {submodule === "marketing" ? (
+        <>
+          {marketingAttributionCard()}
+          <section className={styles.card}>
+            <SectionHead eyebrow="CAMPAIGN ATTRIBUTION" title="活动与优惠效果" action={<button className={styles.secondaryButton} onClick={() => notify("营销活动报表已导出（Demo）")}><Icon name="download" size={14} />导出</button>} />
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead><tr><th>活动</th>{isPlatform ? <th>商家</th> : null}<th>花费</th><th>归因 GMV</th><th>增量 GMV</th><th>增量 ROAS</th><th>优惠成本</th><th>状态</th></tr></thead>
+                <tbody>
+                  {campaignRows.map((campaign) => (
+                    <tr key={campaign.name}>
+                      <td><strong>{campaign.name}</strong></td>
+                      {isPlatform ? <td>{campaign.merchant}</td> : null}
+                      <td>{formatMoney(campaign.spend)}</td>
+                      <td>{formatMoney(campaign.attributed)}</td>
+                      <td>{formatMoney(campaign.incremental)}</td>
+                      <td><span className={campaign.roas >= 1.5 ? styles.positiveText : styles.warningText}>{campaign.roas.toFixed(2)}x</span></td>
+                      <td>{formatMoney(campaign.coupon)}</td>
+                      <td><Badge tone={campaign.roas >= 1.5 ? "green" : "amber"}>{campaign.status}</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className={styles.dataIsolationNote}><Icon name="analytics" size={15} /><span>低增量 ROAS 活动进入观察队列；系统不会仅凭最后点击 ROAS 自动停投。</span></div>
+          </section>
+          <div className={styles.analyticsLayout}>
+            {channelCard()}
+            {aiCompactCard()}
+          </div>
+        </>
+      ) : null}
+
+      {submodule === "customers" ? (
+        <>
+          <div className={styles.customerKpiGrid}>
+            <div><span>新客成交</span><strong>{formatCount(newCustomers)}</strong><small>占订单 36.4%</small></div>
+            <div><span>复购客户</span><strong>{formatCount(orders * 0.28)}</strong><small>复购率 28.1%</small></div>
+            <div><span>客户 LTV</span><strong>€286</strong><small>+8.7% 较上周期</small></div>
+            <div><span>待唤醒客户</span><strong>187</strong><small>90 天未购买</small></div>
+          </div>
+          <div className={styles.analyticsLayout}>
+            <section className={styles.card}>
+              <SectionHead eyebrow="RFM SEGMENTS" title="客户价值分群" action={<Badge tone="blue">动态人群</Badge>} />
+              <div className={styles.segmentMatrix}>
+                {[["高价值忠诚客", "18%", "€486", "高"], ["潜力成长客", "26%", "€218", "中高"], ["新客待培育", "31%", "€96", "中"], ["待唤醒客", "17%", "€142", "低"], ["流失风险客", "8%", "€64", "低"]].map(([name, share, ltv, level]) => (
+                  <div key={name}><span>{name}</span><strong>{share}</strong><small>LTV {ltv}</small><em>{level}</em></div>
+                ))}
+              </div>
+              <div className={styles.dataIsolationNote}><Icon name="customers" size={15} /><span>客户分群基于订单、浏览、搜索和客服事件；商家仅能查看本租户授权范围内的客户标签。</span></div>
+            </section>
+            <section className={styles.card}>
+              <SectionHead eyebrow="RETENTION" title="30 / 60 / 90 天留存" action={<span className={styles.mutedText}>队列口径</span>} />
+              <div className={styles.retentionList}>
+                {[["首购后 30 天", 42, "较上队列 +3.2pp"], ["首购后 60 天", 31, "较上队列 +1.8pp"], ["首购后 90 天", 24, "较上队列 -0.4pp"]].map(([label, value, note]) => (
+                  <div key={label}><div><strong>{label}</strong><span>{value}%</span></div><div><i style={{ width: `${Number(value) * 2}%` }} /></div><small>{note}</small></div>
+                ))}
+              </div>
+            </section>
+          </div>
+          <section className={styles.card}>
+            <SectionHead eyebrow="COHORT RETENTION" title="月度客户留存" action={<button className={styles.textButton}>查看完整队列 <Icon name="arrow" size={14} /></button>} />
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead><tr><th>首购月份</th><th>客户数</th><th>第 1 月</th><th>第 2 月</th><th>第 3 月</th><th>第 4 月</th><th>第 5 月</th></tr></thead>
+                <tbody>
+                  {[["2026-05", "246", "100%", "48%", "36%", "29%", "24%"], ["2026-06", "281", "100%", "51%", "38%", "31%", "—"], ["2026-07", "312", "100%", "46%", "34%", "—", "—"], ["2026-08", "298", "100%", "53%", "—", "—", "—"], ["2026-09", "334", "100%", "—", "—", "—", "—"]].map((row) => (
+                    <tr key={row[0]}>{row.map((cell, index) => <td key={`${row[0]}-${cell}-${index}`}>{index === 0 ? <strong>{cell}</strong> : cell}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          {aiCard()}
+        </>
+      ) : null}
+
+      {submodule === "inventory" ? (
+        <>
+          <div className={styles.inventoryKpiGrid}>
+            <div><span>可售 SKU</span><strong>{isPlatform ? "143" : "64"}</strong><small>在售商品</small></div>
+            <div><span>低库存 SKU</span><strong>{isPlatform ? "17" : "4"}</strong><small className={styles.warningText}>较昨日 +2</small></div>
+            <div><span>缺货风险</span><strong>{isPlatform ? "3" : "1"}</strong><small>7 天内售罄</small></div>
+            <div><span>库存周转</span><strong>{isPlatform ? "6.4x" : "7.1x"}</strong><small>较上周期 +0.3x</small></div>
+            <div><span>库存金额</span><strong>{formatMoney((isPlatform ? 286000 : 148000) * Math.min(scale, 1.2))}</strong><small>按采购成本</small></div>
+          </div>
+          <section className={styles.card}>
+            <SectionHead eyebrow="STOCK RISK" title="补货优先级" action={<button className={styles.secondaryButton} onClick={() => notify("补货建议已生成（Demo）")}><Icon name="box" size={14} />生成补货单</button>} />
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead><tr>{isPlatform ? <th>商品 / 商家</th> : <th>商品</th>}<th>可售库存</th><th>安全库存</th><th>周转天数</th><th>7 天售罄概率</th><th>建议补货</th><th>优先级</th></tr></thead>
+                <tbody>
+                  {productRows.filter((product) => product.stock < product.safety).map((product) => (
+                    <tr key={product.sku}>
+                      <td><span className={styles.tableIdentity}><strong>{product.name}</strong><small>{product.sku}{isPlatform ? ` · ${product.merchant}` : ""}</small></span></td>
+                      <td><span className={styles.warningText}>{product.stock}</span></td>
+                      <td>{product.safety}</td>
+                      <td>{product.turnover.toFixed(1)} 天</td>
+                      <td>{Math.min(96, 62 + (product.safety - product.stock) * 6)}%</td>
+                      <td>{Math.max(12, (product.safety - product.stock) * 3)} 件</td>
+                      <td><Badge tone="amber">高</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <div className={styles.analyticsLayout}>
+            <section className={styles.card}>
+              <SectionHead eyebrow="INVENTORY AGING" title="库存库龄结构" action={<Badge tone="gray">当前快照</Badge>} />
+              <div className={styles.inventoryAging}>
+                {[["0–30 天", 46, "€68.2k", "健康"], ["31–60 天", 27, "€40.1k", "正常"], ["61–90 天", 17, "€25.2k", "关注"], ["90 天以上", 10, "€14.8k", "滞销风险"]].map(([label, value, amount, state]) => (
+                  <div key={label}><div><strong>{label}</strong><span>{value}% · {amount}</span></div><div><i style={{ width: `${Number(value) * 2}%` }} /></div><small>{state}</small></div>
+                ))}
+              </div>
+            </section>
+            {aiCompactCard()}
+          </div>
+        </>
+      ) : null}
+
+      {!isPlatform ? <div className={styles.dataIsolationNote}><Icon name="platform" size={15} /><span>商家 BI 查询必须由后端强制追加 `merchant_id = currentMerchant`，前端隐藏不构成安全边界；营销增量与客户分群同样遵循租户隔离。</span></div> : null}
     </div>
   )
 }
@@ -1460,7 +2059,7 @@ function PortalContent({
     case "service":
       return <ServicePage role={role} submodule={submodule} notify={notify} />
     case "analytics":
-      return <AnalyticsPage role={role} submodule={submodule} />
+      return <AnalyticsPage role={role} submodule={submodule} notify={notify} />
     case "platform":
       return <PlatformPage submodule={submodule} notify={notify} />
     default:
